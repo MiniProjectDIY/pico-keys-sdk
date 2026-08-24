@@ -31,6 +31,7 @@ static portMUX_TYPE mutex = portMUX_INITIALIZER_UNLOCKED;
 #include "picokeys_version.h"
 #include "apdu.h"
 #include "usb.h"
+#include "button.h"
 
 extern void init_fido(void);
 bool is_nk = false;
@@ -331,7 +332,6 @@ static uint32_t allocate_cid(void) {
 }
 
 uint8_t thread_type = 0; //1 is APDU, 2 is CBOR
-extern volatile bool cancel_button;
 extern int cbor_process(uint8_t last_cmd, const uint8_t *data, size_t len);
 static uint32_t last_keepalive_time = 0;
 

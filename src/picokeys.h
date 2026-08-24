@@ -149,10 +149,6 @@ static inline uint32_t put_uint64_le(uint64_t n, uint8_t *b) {
     return 8;
 }
 
-extern int (*button_pressed_cb)(uint8_t);
-
-extern bool is_req_button_pending(void);
-
 #define PICOKEYS_OK                              0
 #define PICOKEYS_ERR_NO_MEMORY                   -1000
 #define PICOKEYS_ERR_MEMORY_FATAL                -1001

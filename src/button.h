@@ -25,11 +25,23 @@
 #define BOOT_PIN GPIO_NUM_0
 #endif
 
-extern int button_wait(void);
+typedef enum {
+    BUTTON_EV_PRESSED,
+    BUTTON_EV_TIMEOUT,
+    BUTTON_EV_CANCELLED,
+    BUTTON_EV_NONE,
+} button_event_t;
+
+extern void button_wait_start(void);
+extern void button_wait_poll(void);
 extern volatile uint32_t button_pressed_duration;
 extern void button_task(void);
 extern volatile bool cancel_button;
 extern bool touch_accept_button;
 extern volatile bool force_button_wait;
+
+extern int (*button_pressed_cb)(uint8_t);
+
+extern bool is_req_button_pending(void);
 
 #endif // BUTTON_H
