@@ -152,7 +152,7 @@ bool picokeys_vault_record_available(const file_t *file, uint8_t app_id) {
     return picokeys_vault_record_valid(record, PICOKEYS_VAULT_RECORD_SIZE);
 }
 
-int picokeys_vault_store_record(file_t *file, uint8_t app_id, bool preserve_legacy_when_empty, const_byte_array_t record, uint8_t *scratch, size_t scratch_size) {
+int picokeys_vault_store_record(file_t *file, uint8_t app_id, const_byte_array_t record, uint8_t *scratch, size_t scratch_size) {
     if (!file || record.len == 0 || !record.data || !scratch || record.len > scratch_size) {
         return PICOKEYS_WRONG_DATA;
     }
@@ -162,10 +162,6 @@ int picokeys_vault_store_record(file_t *file, uint8_t app_id, bool preserve_lega
     if (minimum_container_size > scratch_size) {
         return PICOKEYS_WRONG_LENGTH;
     }
-    if (!file_has_data(file) && preserve_legacy_when_empty) {
-        return file_put_data(file, record);
-    }
-
     size_t container_len;
     if (!file_has_data(file)) {
         memcpy(scratch, vault_container_magic, sizeof(vault_container_magic));
@@ -251,7 +247,7 @@ int picokeys_vault_load_kvault(const file_t *file, uint8_t app_id, const uint8_t
     return picokeys_vault_unwrap(wrapping_key, record, kvault);
 }
 
-int picokeys_vault_store_kvault(file_t *file, uint8_t app_id, bool preserve_legacy_when_empty, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
+int picokeys_vault_store_kvault(file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
     if (!file || !wrapping_key || !kvault) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
@@ -268,7 +264,7 @@ int picokeys_vault_store_kvault(file_t *file, uint8_t app_id, bool preserve_lega
             ret = PICOKEYS_ERR_NO_MEMORY;
         }
         else {
-            ret = picokeys_vault_store_record(file, app_id, preserve_legacy_when_empty, CONST_BYTE_ARRAY(record, sizeof(record)), container, container_size);
+            ret = picokeys_vault_store_record(file, app_id, CONST_BYTE_ARRAY(record, sizeof(record)), container, container_size);
             mbedtls_platform_zeroize(container, container_size);
             free(container);
         }
@@ -653,7 +649,7 @@ int picokeys_vault_enrollment_finish(const uint8_t *packet, size_t packet_len, f
     }
 
     if (ret == PICOKEYS_OK) {
-        ret = picokeys_vault_store_kvault(file, app_id, app_id == 0, wrapping_key, kvault);
+        ret = picokeys_vault_store_kvault(file, app_id, wrapping_key, kvault);
     }
     if (ret == PICOKEYS_OK && !flash_commit_sync(5000)) {
         ret = PICOKEYS_ERR_MEMORY_FATAL;

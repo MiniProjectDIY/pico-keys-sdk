@@ -49,11 +49,11 @@ bool picokeys_vault_container_valid(const uint8_t *data, size_t data_len, size_t
 bool picokeys_vault_record_valid(const uint8_t *record, size_t record_len);
 const uint8_t *picokeys_vault_find_record(const file_t *file, uint8_t app_id, size_t record_size);
 bool picokeys_vault_record_available(const file_t *file, uint8_t app_id);
-int picokeys_vault_store_record(file_t *file, uint8_t app_id, bool preserve_legacy_when_empty, const_byte_array_t record, uint8_t *scratch, size_t scratch_size);
+int picokeys_vault_store_record(file_t *file, uint8_t app_id, const_byte_array_t record, uint8_t *scratch, size_t scratch_size);
 int picokeys_vault_wrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], uint8_t record[PICOKEYS_VAULT_RECORD_SIZE]);
 int picokeys_vault_unwrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t record[PICOKEYS_VAULT_RECORD_SIZE], uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]);
 int picokeys_vault_load_kvault(const file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]);
-int picokeys_vault_store_kvault(file_t *file, uint8_t app_id, bool preserve_legacy_when_empty, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]);
+int picokeys_vault_store_kvault(file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]);
 int picokeys_vault_hash_kvault(const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], uint8_t vault_id[PICOKEYS_VAULT_KEY_SIZE]);
 int picokeys_vault_layer_key(const uint8_t key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t vault_id[PICOKEYS_VAULT_KEY_SIZE], const uint8_t credential_hash[PICOKEYS_VAULT_KEY_SIZE], uint8_t algorithm, uint8_t layer, uint8_t out[PICOKEYS_VAULT_KEY_SIZE]);
 int picokeys_vault_encrypt_layer(uint8_t algorithm, const uint8_t key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t nonce[PICOKEYS_VAULT_BLOB_NONCE_SIZE], const uint8_t *aad, size_t aad_len, const uint8_t *input, size_t input_len, uint8_t *output, uint8_t tag[PICOKEYS_VAULT_BLOB_TAG_SIZE]);
