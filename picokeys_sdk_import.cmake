@@ -170,6 +170,11 @@ set(MBEDTLS_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pk.c
     ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pk_wrap.c
     ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pkwrite.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/x509.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/x509_crt.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pkparse.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pk_ecc.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pkcs12.c
 )
 
 if(ENABLE_EDDSA)
@@ -338,6 +343,7 @@ list(APPEND PICOKEYS_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/button.c
     ${CMAKE_CURRENT_LIST_DIR}/src/led/led.c
     ${CMAKE_CURRENT_LIST_DIR}/src/signal.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/vault.c
 )
 
 if(ESP_PLATFORM)
