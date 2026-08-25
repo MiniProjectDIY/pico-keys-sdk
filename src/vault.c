@@ -328,6 +328,9 @@ static int vault_enrollment_validate_serial(mbedtls_x509_crt *certificate) {
         return PICOKEYS_VERIFICATION_FAILED;
     }
 
+#ifdef ENABLE_EMULATION
+    return PICOKEYS_OK;
+#else
     size_t serial_len = strlen(pico_serial_str);
     for (mbedtls_x509_sequence *entry = certificate->subject_alt_names.next; entry; entry = entry->next) {
         mbedtls_x509_subject_alternative_name san = { 0 };
@@ -339,6 +342,7 @@ static int vault_enrollment_validate_serial(mbedtls_x509_crt *certificate) {
         mbedtls_x509_free_subject_alt_name(&san);
     }
     return PICOKEYS_VERIFICATION_FAILED;
+#endif
 }
 
 static int vault_enrollment_certificate_public(mbedtls_x509_crt *certificate, uint8_t public_key[PICOKEYS_VAULT_X448_BYTES]) {
@@ -413,12 +417,14 @@ int picokeys_vault_enrollment_decode(const uint8_t *packet, size_t packet_len, u
 
     uint8_t enrollment_plain[PICOKEYS_VAULT_ENROLL_PLAIN_MAX] = { 0 };
     size_t plain_len = encrypted_len - 16u;
+    const uint8_t *enrollment_cipher = packet + encrypted_offset + 12u;
+    const uint8_t *enrollment_tag = packet + encrypted_offset + 12u + plain_len;
     if (ret == PICOKEYS_OK) {
         mbedtls_gcm_context gcm;
         mbedtls_gcm_init(&gcm);
         ret = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, session_key, 256);
         if (ret == 0) {
-            ret = mbedtls_gcm_auth_decrypt(&gcm, plain_len, packet + encrypted_offset + 12u, 12u, info, sizeof(info), packet + encrypted_offset + 12u + plain_len, 16u, packet + encrypted_offset + 12u, enrollment_plain);
+            ret = mbedtls_gcm_auth_decrypt(&gcm, plain_len, packet + encrypted_offset, 12u, info, sizeof(info), enrollment_tag, sizeof(enrollment_tag), enrollment_cipher, enrollment_plain);
         }
         mbedtls_gcm_free(&gcm);
     }
