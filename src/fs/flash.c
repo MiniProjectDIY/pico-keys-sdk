@@ -108,7 +108,6 @@ static uintptr_t allocate_free_addr(uint32_t size, bool persistent, uintptr_t *p
         next_base = flash_read_uintptr(base);
 
         uintptr_t gap_start = startp;
-        bool gap_reusable = true;
         if (next_base != 0x0) {
             if (next_base >= base) {
                 return 0x0;
@@ -118,10 +117,10 @@ static uintptr_t allocate_free_addr(uint32_t size, bool persistent, uintptr_t *p
                 return 0x0;
             }
             gap_start = next_base + next_size;
-            gap_reusable = (flash_read_uint16(next_base + 2 * sizeof(uintptr_t)) & 0x1000) != 0x1000;
         }
 
-        if (gap_reusable && potential_addr >= gap_start && potential_addr >= startp) {
+        /* Cleared records are unlinked and zeroed, so every gap is reusable. */
+        if (potential_addr >= gap_start && potential_addr >= startp) {
             int r = flash_program_uintptr(potential_addr, next_base);
             if (r == PICOKEYS_OK) {
                 r = flash_program_uintptr(potential_addr + sizeof(uintptr_t), base);
