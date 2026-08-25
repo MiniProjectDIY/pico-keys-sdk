@@ -44,18 +44,13 @@ extern int picokeys_vault_hash_kvault(const uint8_t kvault[PICOKEYS_VAULT_KEY_SI
 extern int picokeys_vault_layer_key(const uint8_t key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t vault_id[PICOKEYS_VAULT_KEY_SIZE], const uint8_t credential_hash[PICOKEYS_VAULT_KEY_SIZE], uint8_t algorithm, uint8_t layer, uint8_t out[PICOKEYS_VAULT_KEY_SIZE]);
 extern int picokeys_vault_encrypt_layer(uint8_t algorithm, const uint8_t key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t nonce[PICOKEYS_VAULT_BLOB_NONCE_SIZE], const uint8_t *aad, size_t aad_len, const uint8_t *input, size_t input_len, uint8_t *output, uint8_t tag[PICOKEYS_VAULT_BLOB_TAG_SIZE]);
 extern int picokeys_vault_decrypt_layer(uint8_t algorithm, const uint8_t key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t nonce[PICOKEYS_VAULT_BLOB_NONCE_SIZE], const uint8_t *aad, size_t aad_len, const uint8_t *input, size_t input_len, const uint8_t tag[PICOKEYS_VAULT_BLOB_TAG_SIZE], uint8_t *output);
-extern int picokeys_vault_x448_generate(uint8_t private_key[PICOKEYS_VAULT_X448_BYTES], uint8_t public_key[PICOKEYS_VAULT_X448_BYTES]);
-extern int picokeys_vault_x448_shared(const uint8_t private_key[PICOKEYS_VAULT_X448_BYTES], const uint8_t peer_public[PICOKEYS_VAULT_X448_BYTES], uint8_t shared[PICOKEYS_VAULT_X448_BYTES]);
-extern bool picokeys_vault_enrollment_active(void);
 extern bool picokeys_vault_enrollment_button_ready(void);
 extern int picokeys_vault_enrollment_start(uint8_t public_key[PICOKEYS_VAULT_X448_BYTES], uint8_t challenge[PICOKEYS_VAULT_ENROLL_CHALLENGE_BYTES]);
 extern void picokeys_vault_enrollment_clear(void);
 extern void picokeys_vault_enrollment_reset(void);
-extern int picokeys_vault_enrollment_finish(const uint8_t *packet, size_t packet_len, file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], uint8_t *metadata, size_t metadata_capacity, size_t *metadata_len);
+extern int picokeys_vault_enrollment_decode(const uint8_t *packet, size_t packet_len, uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], uint8_t *metadata, size_t metadata_capacity, size_t *metadata_len);
 extern bool picokeys_vault_algorithm_valid(uint8_t algorithm);
 extern size_t picokeys_vault_algorithm_layers(uint8_t algorithm);
 extern uint8_t picokeys_vault_algorithm_layer(uint8_t algorithm, size_t layer);
-extern int picokeys_vault_clear_file(file_t *file);
-extern int picokeys_vault_unenroll(file_t *file, file_t *label_file, uint8_t app_id);
 
 #endif // _PICOKEYS_VAULT_H_

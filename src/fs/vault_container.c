@@ -17,138 +17,25 @@
 
 #include "vault_container.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "picokeys.h"
 #include "flash.h"
+#include "object_policy.h"
 
-static const uint8_t vault_container_magic[4] = { 'K', 'V', 'W', '1' };
-
-static bool vault_legacy_record_valid(const uint8_t *data, size_t data_len, size_t record_size) {
-    return data_len == record_size && (record_size != PICOKEYS_VAULT_RECORD_SIZE || picokeys_vault_record_valid(data, data_len));
-}
-
-bool picokeys_vault_container_valid(const uint8_t *data, size_t data_len, size_t record_size) {
-    if (!data || record_size == 0 || data_len < PICOKEYS_VAULT_CONTAINER_HEADER_SIZE || memcmp(data, vault_container_magic, sizeof(vault_container_magic)) != 0 || data[4] != 1) {
-        return false;
-    }
-
-    uint8_t count = data[5];
-    size_t container_record_size = PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE + record_size;
-    if (count == 0 || data_len != PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + count * container_record_size) {
-        return false;
-    }
-
-    for (uint8_t i = 0; i < count; i++) {
-        size_t offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + i * container_record_size;
-        for (uint8_t j = 0; j < i; j++) {
-            size_t previous_offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + j * container_record_size;
-            if (data[offset] == data[previous_offset]) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool picokeys_vault_record_valid(const uint8_t *record, size_t record_len) {
+static bool vault_record_valid(const uint8_t *record, size_t record_len) {
     return record && record_len == PICOKEYS_VAULT_RECORD_SIZE && record[0] == PICOKEYS_VAULT_RECORD_FORMAT;
 }
 
-const uint8_t *picokeys_vault_find_record(const file_t *file, uint8_t app_id, size_t record_size) {
-    if (!file || !file_has_data(file) || record_size == 0) {
+static const uint8_t *vault_legacy_record(const file_t *file) {
+    if (!file || !file_has_data(file) || file_get_size(file) != PICOKEYS_VAULT_RECORD_SIZE) {
         return NULL;
     }
-
-    const uint8_t *data = file_get_data(file);
-    size_t data_len = file_get_size(file);
-    if (app_id == 0 && vault_legacy_record_valid(data, data_len, record_size)) {
-        return data;
-    }
-    if (!picokeys_vault_container_valid(data, data_len, record_size)) {
-        return NULL;
-    }
-
-    uint8_t count = data[5];
-    size_t container_record_size = PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE + record_size;
-    for (uint8_t i = 0; i < count; i++) {
-        size_t offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + i * container_record_size;
-        if (data[offset] == app_id) {
-            return data + offset + PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE;
-        }
-    }
-    return NULL;
+    const uint8_t *record = file_get_data(file);
+    return vault_record_valid(record, PICOKEYS_VAULT_RECORD_SIZE) ? record : NULL;
 }
 
-bool picokeys_vault_record_available(const file_t *file, uint8_t app_id) {
-    const uint8_t *record = picokeys_vault_find_record(file, app_id, PICOKEYS_VAULT_RECORD_SIZE);
-    return picokeys_vault_record_valid(record, PICOKEYS_VAULT_RECORD_SIZE);
-}
-
-int picokeys_vault_store_record(file_t *file, uint8_t app_id, const_byte_array_t record, uint8_t *scratch, size_t scratch_size) {
-    if (!file || record.len == 0 || !record.data || !scratch || record.len > scratch_size) {
-        return PICOKEYS_WRONG_DATA;
-    }
-
-    size_t container_record_size = PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE + record.len;
-    size_t minimum_container_size = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + container_record_size;
-    if (minimum_container_size > scratch_size) {
-        return PICOKEYS_WRONG_LENGTH;
-    }
-    size_t container_len;
-    if (!file_has_data(file)) {
-        memcpy(scratch, vault_container_magic, sizeof(vault_container_magic));
-        scratch[4] = 1;
-        scratch[5] = 1;
-        scratch[PICOKEYS_VAULT_CONTAINER_HEADER_SIZE] = app_id;
-        memcpy(scratch + PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + 1, record.data, record.len);
-        container_len = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + container_record_size;
-    }
-    else {
-        const uint8_t *data = file_get_data(file);
-        size_t data_len = file_get_size(file);
-        if (vault_legacy_record_valid(data, data_len, record.len)) {
-            memcpy(scratch, vault_container_magic, sizeof(vault_container_magic));
-            scratch[4] = 1;
-            scratch[5] = 1;
-            scratch[PICOKEYS_VAULT_CONTAINER_HEADER_SIZE] = 0;
-            memcpy(scratch + PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + 1, data, data_len);
-            container_len = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + container_record_size;
-        }
-        else if (picokeys_vault_container_valid(data, data_len, record.len)) {
-            if (data_len > scratch_size || data_len + container_record_size > scratch_size) {
-                return PICOKEYS_WRONG_LENGTH;
-            }
-            memcpy(scratch, data, data_len);
-            container_len = data_len;
-        }
-        else {
-            return PICOKEYS_WRONG_DATA;
-        }
-    }
-
-    uint8_t count = scratch[5];
-    for (uint8_t i = 0; i < count; i++) {
-        size_t offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + i * container_record_size;
-        if (scratch[offset] == app_id) {
-            memcpy(scratch + offset + 1, record.data, record.len);
-            return file_put_data(file, CONST_BYTE_ARRAY(scratch, container_len));
-        }
-    }
-    if (count == UINT8_MAX) {
-        return PICOKEYS_ERR_NO_MEMORY;
-    }
-
-    size_t offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + count * container_record_size;
-    scratch[offset] = app_id;
-    memcpy(scratch + offset + 1, record.data, record.len);
-    scratch[5] = count + 1;
-    container_len += container_record_size;
-    return file_put_data(file, CONST_BYTE_ARRAY(scratch, container_len));
-}
-
-int picokeys_vault_wrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], uint8_t record[PICOKEYS_VAULT_RECORD_SIZE]) {
+static int vault_wrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], uint8_t record[PICOKEYS_VAULT_RECORD_SIZE]) {
     if (!wrapping_key || !kvault || !record) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
@@ -157,7 +44,7 @@ int picokeys_vault_wrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], con
     return encrypt_with_aad(wrapping_key, CONST_BYTE_ARRAY(kvault, PICOKEYS_VAULT_KEY_SIZE), PICOKEYS_VAULT_RECORD_FORMAT, record + 1);
 }
 
-int picokeys_vault_unwrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t record[PICOKEYS_VAULT_RECORD_SIZE], uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
+static int vault_unwrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t record[PICOKEYS_VAULT_RECORD_SIZE], uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
     if (!wrapping_key || !record || !kvault) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
@@ -168,46 +55,7 @@ int picokeys_vault_unwrap(const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], c
     return decrypt_with_aad(wrapping_key, CONST_BYTE_ARRAY(record + 1, PICOKEYS_VAULT_RECORD_SIZE - 1), PICOKEYS_VAULT_RECORD_FORMAT, kvault);
 }
 
-int picokeys_vault_load_kvault(const file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
-    if (!file || !wrapping_key || !kvault) {
-        return PICOKEYS_ERR_NULL_PARAM;
-    }
-
-    const uint8_t *record = picokeys_vault_find_record(file, app_id, PICOKEYS_VAULT_RECORD_SIZE);
-    if (!record) {
-        return PICOKEYS_ERR_FILE_NOT_FOUND;
-    }
-
-    return picokeys_vault_unwrap(wrapping_key, record, kvault);
-}
-
-int picokeys_vault_store_kvault(file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
-    if (!file || !wrapping_key || !kvault) {
-        return PICOKEYS_ERR_NULL_PARAM;
-    }
-
-    uint8_t record[PICOKEYS_VAULT_RECORD_SIZE] = { 0 };
-    int ret = picokeys_vault_wrap(wrapping_key, kvault, record);
-    if (ret == PICOKEYS_OK) {
-        size_t container_size = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE + PICOKEYS_VAULT_RECORD_SIZE;
-        if (file_has_data(file)) {
-            container_size = file_get_size(file) + PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE + PICOKEYS_VAULT_RECORD_SIZE;
-        }
-        uint8_t *container = malloc(container_size);
-        if (!container) {
-            ret = PICOKEYS_ERR_NO_MEMORY;
-        }
-        else {
-            ret = picokeys_vault_store_record(file, app_id, CONST_BYTE_ARRAY(record, sizeof(record)), container, container_size);
-            mbedtls_platform_zeroize(container, container_size);
-            free(container);
-        }
-    }
-    mbedtls_platform_zeroize(record, sizeof(record));
-    return ret;
-}
-
-int picokeys_vault_clear_wrapper(file_t *file, uint8_t app_id) {
+static int vault_clear_legacy_record(file_t *file) {
     if (!file) {
         return PICOKEYS_OK;
     }
@@ -216,52 +64,417 @@ int picokeys_vault_clear_wrapper(file_t *file, uint8_t app_id) {
         return PICOKEYS_OK;
     }
 
-    const uint8_t *data = file_get_data(file);
-    size_t data_len = file_get_size(file);
-    if (picokeys_vault_record_valid(data, data_len)) {
-        if (app_id != 0) {
-            return PICOKEYS_OK;
-        }
-        meta_delete_no_commit(file->fid);
-        return flash_clear_file(file);
+    return vault_legacy_record(file) ? flash_clear_file(file) : PICOKEYS_WRONG_DATA;
+}
+
+/* The object layout is shared by all applications using the SDK vault. */
+#define PICOKEYS_VAULT_NAMESPACE 0x0002u
+#define PICOKEYS_VAULT_CONTAINER_KIND 0x0002u
+#define PICOKEYS_VAULT_CONTAINER_ID 0u
+#define PICOKEYS_VAULT_COMMIT_TIMEOUT_MS 5000u
+#define PICOKEYS_VAULT_WRAP_SIZE PICOKEYS_VAULT_RECORD_SIZE
+#define PICOKEYS_VAULT_WRAP_PROTECTION FILE_OBJECT_PROTECTION_AEAD_SECRET
+#define PICOKEYS_VAULT_WRAP_FLAGS (FILE_OBJECT_FLAG_MUTABLE | FILE_OBJECT_FLAG_NON_EXPORTABLE)
+#define PICOKEYS_VAULT_LABEL_PROTECTION FILE_OBJECT_PROTECTION_AUTHENTICATED_PUBLIC
+#define PICOKEYS_VAULT_LABEL_FLAGS FILE_OBJECT_FLAG_MUTABLE
+
+typedef struct picokeys_vault_state {
+    const file_object_container_layout_t *layout;
+    file_object_container_crypto_t primary;
+    file_object_container_crypto_t legacy;
+    bool has_legacy;
+    file_t *legacy_file;
+    file_t *legacy_label_file;
+    bool initialized;
+} picokeys_vault_state_t;
+
+static const uint8_t vault_internal_policy[] = {
+    FILE_OBJECT_POLICY_FORMAT_VERSION, 1,
+    0x1f, 0xff, 0x00, 0x00, 0x04, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00
+};
+
+static picokeys_vault_state_t vault_state;
+static const file_object_container_layout_t vault_layout;
+
+static bool vault_state_valid(void) {
+    return vault_state.initialized && vault_state.layout && vault_state.primary.auth && vault_state.primary.protector;
+}
+
+static uint16_t vault_manifest_fid(uint8_t slot) {
+    return (uint16_t)((slot == 0 ? 0xc4u : 0xc5u) << 8);
+}
+
+static uint16_t vault_record_fid(uint8_t slot, uint16_t object_type, uint8_t object_tag) {
+    uint8_t prefix;
+    if (object_type == PICOKEYS_VAULT_OBJECT_WRAP) {
+        prefix = slot == 0 ? 0xc6u : 0xc7u;
     }
-    if (!picokeys_vault_container_valid(data, data_len, PICOKEYS_VAULT_RECORD_SIZE)) {
+    else {
+        prefix = slot == 0 ? 0xc8u : 0xc9u;
+    }
+    return (uint16_t)((prefix << 8) | object_tag);
+}
+
+static bool vault_object_type_valid(uint16_t object_type) {
+    return object_type == PICOKEYS_VAULT_OBJECT_WRAP || object_type == PICOKEYS_VAULT_OBJECT_LABEL;
+}
+
+static bool vault_record_id_valid(const file_object_descriptor_t *object) {
+    if (!object || !vault_object_type_valid(object->object_type) || object->object_tag > UINT8_MAX || (object->object_type == PICOKEYS_VAULT_OBJECT_LABEL && object->object_tag != 0) || object->record_id > UINT16_MAX) {
+        return false;
+    }
+    uint16_t record_fid = (uint16_t)object->record_id;
+    return record_fid == vault_record_fid(0, object->object_type, (uint8_t)object->object_tag) || record_fid == vault_record_fid(1, object->object_type, (uint8_t)object->object_tag);
+}
+
+static uint16_t vault_layout_manifest_fid(void *ctx, uint32_t container_id, uint8_t slot) {
+    (void)ctx;
+    return container_id == PICOKEYS_VAULT_CONTAINER_ID ? vault_manifest_fid(slot) : 0;
+}
+
+static int vault_layout_record_fid(void *ctx, uint32_t container_id, const file_object_descriptor_t *object, uint16_t *fid) {
+    (void)ctx;
+    if (!fid || container_id != PICOKEYS_VAULT_CONTAINER_ID || !vault_record_id_valid(object)) {
         return PICOKEYS_WRONG_DATA;
     }
+    *fid = (uint16_t)object->record_id;
+    return PICOKEYS_OK;
+}
 
-    uint8_t count = data[5];
-    size_t record_size = PICOKEYS_VAULT_CONTAINER_RECORD_PREFIX_SIZE + PICOKEYS_VAULT_RECORD_SIZE;
-    size_t remove_index = count;
-    for (uint8_t i = 0; i < count; i++) {
-        if (data[PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + i * record_size] == app_id) {
-            remove_index = i;
-            break;
-        }
+static int vault_layout_record_allocate(void *ctx, uint32_t container_id, uint8_t target_slot, const file_object_container_write_t *write, const file_object_authenticator_t *auth, uint64_t *record_id, uint16_t *fid) {
+    (void)ctx;
+    (void)auth;
+    if (!write || !record_id || !fid || container_id != PICOKEYS_VAULT_CONTAINER_ID || !vault_object_type_valid(write->object_type) || write->object_tag > UINT8_MAX || (write->object_type == PICOKEYS_VAULT_OBJECT_LABEL && write->object_tag != 0)) {
+        return PICOKEYS_ERR_NULL_PARAM;
     }
-    if (remove_index == count) {
+    *fid = vault_record_fid(target_slot, write->object_type, (uint8_t)write->object_tag);
+    *record_id = *fid;
+    return PICOKEYS_OK;
+}
+
+static int vault_policy_hash(void *ctx, uint16_t policy_id, uint8_t hash[FILE_OBJECT_POLICY_HASH_SIZE]) {
+    (void)ctx;
+    if (!hash || policy_id != PICOKEYS_VAULT_POLICY_ID) {
+        return PICOKEYS_WRONG_DATA;
+    }
+    return file_object_policy_hash(CONST_BYTE_ARRAY(vault_internal_policy, sizeof(vault_internal_policy)), hash);
+}
+
+static bool vault_write_valid(void *ctx, const file_object_container_write_t *write) {
+    (void)ctx;
+    if (!write || write->policy_id != PICOKEYS_VAULT_POLICY_ID || write->key_domain != 0 || write->object_tag > UINT8_MAX) {
+        return false;
+    }
+    if (write->object_type == PICOKEYS_VAULT_OBJECT_WRAP) {
+        return write->data.len == PICOKEYS_VAULT_WRAP_SIZE && write->protection == PICOKEYS_VAULT_WRAP_PROTECTION && write->flags == PICOKEYS_VAULT_WRAP_FLAGS;
+    }
+    return write->object_type == PICOKEYS_VAULT_OBJECT_LABEL && write->object_tag == 0 && write->data.len <= PICOKEYS_VAULT_LABEL_MAX && write->protection == PICOKEYS_VAULT_LABEL_PROTECTION && write->flags == PICOKEYS_VAULT_LABEL_FLAGS;
+}
+
+static bool vault_descriptor_valid(void *ctx, uint32_t container_id, const file_object_descriptor_t *object) {
+    (void)ctx;
+    return container_id == PICOKEYS_VAULT_CONTAINER_ID && object && vault_object_type_valid(object->object_type) && object->object_tag <= UINT8_MAX && (object->object_type == PICOKEYS_VAULT_OBJECT_WRAP || object->object_tag == 0) && object->policy_id == PICOKEYS_VAULT_POLICY_ID && object->key_domain == 0;
+}
+
+static int vault_marker_write(void) {
+    static const uint8_t marker[] = { 'P', 'K', 'V', 'O', 1 };
+    if (!vault_state.legacy_file) {
         return PICOKEYS_OK;
     }
-    if (count == 1) {
-        meta_delete_no_commit(file->fid);
-        return flash_clear_file(file);
+    int ret = flash_clear_file(vault_state.legacy_file);
+    if (ret != PICOKEYS_OK) {
+        return ret;
     }
+    return file_put_data(vault_state.legacy_file, CONST_BYTE_ARRAY(marker, sizeof(marker)));
+}
 
-    uint8_t *updated = malloc(data_len);
-    if (!updated) {
-        return PICOKEYS_ERR_NO_MEMORY;
+static int vault_layout_activate(void *ctx, uint32_t container_id) {
+    (void)ctx;
+    return container_id == PICOKEYS_VAULT_CONTAINER_ID ? vault_marker_write() : PICOKEYS_WRONG_DATA;
+}
+
+static int vault_layout_retire(void *ctx, uint32_t container_id, const file_object_container_state_t *state, const file_object_manifest_t *next, uint8_t current_slot, uint8_t target_slot) {
+    (void)ctx;
+    (void)current_slot;
+    if (container_id != PICOKEYS_VAULT_CONTAINER_ID || !state || !next) {
+        return PICOKEYS_WRONG_DATA;
     }
-    memcpy(updated, data, PICOKEYS_VAULT_CONTAINER_HEADER_SIZE);
-    updated[5] = count - 1;
-    size_t output_offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE;
-    for (uint8_t i = 0; i < count; i++) {
-        if (i != remove_index) {
-            size_t input_offset = PICOKEYS_VAULT_CONTAINER_HEADER_SIZE + i * record_size;
-            memcpy(updated + output_offset, data + input_offset, record_size);
-            output_offset += record_size;
+    for (uint8_t slot = 0; slot < FILE_OBJECT_CONTAINER_SLOT_COUNT; slot++) {
+        const file_object_container_candidate_t *candidate = &state->candidates[slot];
+        if (!candidate->valid) {
+            continue;
+        }
+        for (uint16_t i = 0; i < candidate->manifest.object_count; i++) {
+            const file_object_descriptor_t *object = &candidate->manifest.objects[i];
+            if (!file_object_container_references(next, object->record_id)) {
+                uint16_t record_fid = 0;
+                if (vault_layout_record_fid(ctx, container_id, object, &record_fid) != PICOKEYS_OK) {
+                    return PICOKEYS_WRONG_DATA;
+                }
+                file_t *record = file_search(record_fid);
+                if (record) {
+                    file_delete_no_commit(record);
+                }
+            }
+        }
+        if (slot != target_slot) {
+            file_t *manifest = file_search(vault_manifest_fid(slot));
+            if (manifest) {
+                file_delete_no_commit(manifest);
+            }
         }
     }
-    int ret = file_put_data(file, CONST_BYTE_ARRAY(updated, output_offset));
-    mbedtls_platform_zeroize(updated, data_len);
-    free(updated);
+    flash_commit();
+    return PICOKEYS_OK;
+}
+
+static int vault_layout_deactivate(void *ctx, uint32_t container_id) {
+    (void)ctx;
+    if (container_id != PICOKEYS_VAULT_CONTAINER_ID || !vault_state.legacy_file) {
+        return PICOKEYS_OK;
+    }
+    return flash_clear_file(vault_state.legacy_file);
+}
+
+static const file_object_container_layout_t vault_layout = {
+    .ctx = &vault_state,
+    .namespace_id = PICOKEYS_VAULT_NAMESPACE,
+    .container_kind = PICOKEYS_VAULT_CONTAINER_KIND,
+    .commit_timeout_ms = PICOKEYS_VAULT_COMMIT_TIMEOUT_MS,
+    .manifest_fid = vault_layout_manifest_fid,
+    .record_fid = vault_layout_record_fid,
+    .record_allocate = vault_layout_record_allocate,
+    .policy_hash = vault_policy_hash,
+    .write_valid = vault_write_valid,
+    .descriptor_valid = vault_descriptor_valid,
+    .activate = vault_layout_activate,
+    .deactivate = vault_layout_deactivate,
+    .retire = vault_layout_retire,
+    .rollback_new_records = true
+};
+
+int picokeys_vault_init(const file_object_container_crypto_t *primary, const file_object_container_crypto_t *legacy, file_t *legacy_file, file_t *legacy_label_file) {
+    if (!primary || !primary->auth || !primary->protector) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    vault_state.layout = &vault_layout;
+    vault_state.primary = *primary;
+    vault_state.has_legacy = legacy && legacy->auth && legacy->protector;
+    vault_state.legacy = vault_state.has_legacy ? *legacy : (file_object_container_crypto_t){ 0 };
+    vault_state.legacy_file = legacy_file;
+    vault_state.legacy_label_file = legacy_label_file;
+    vault_state.initialized = true;
+    return PICOKEYS_OK;
+}
+
+static int vault_update(const file_object_container_write_t *writes, size_t write_count) {
+    if (!vault_state_valid() || !writes || write_count == 0) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    return file_object_container_update(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, writes, write_count, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL);
+}
+
+bool picokeys_vault_wrap_available(uint8_t app_id) {
+    uint32_t object_size = 0;
+    return vault_state_valid() && file_object_container_object_size(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, PICOKEYS_VAULT_OBJECT_WRAP, app_id, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL, NULL, NULL, &object_size) == PICOKEYS_OK && object_size == PICOKEYS_VAULT_WRAP_SIZE;
+}
+
+static int vault_get_wrap_record(uint8_t app_id, uint8_t record[PICOKEYS_VAULT_RECORD_SIZE]) {
+    if (!vault_state_valid() || !record) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    byte_buffer_t output = BYTE_BUFFER(record, PICOKEYS_VAULT_RECORD_SIZE);
+    int ret = file_object_container_read(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, PICOKEYS_VAULT_OBJECT_WRAP, app_id, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL, NULL, NULL, &output);
+    return ret == PICOKEYS_OK && output.len == PICOKEYS_VAULT_RECORD_SIZE ? PICOKEYS_OK : (ret == PICOKEYS_OK ? PICOKEYS_WRONG_LENGTH : ret);
+}
+
+static int vault_set_wrap_record(const uint8_t record[PICOKEYS_VAULT_RECORD_SIZE], uint8_t app_id) {
+    if (!record) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    const file_object_container_write_t write = {
+        .object_type = PICOKEYS_VAULT_OBJECT_WRAP,
+        .object_tag = app_id,
+        .data = CONST_BYTE_ARRAY(record, PICOKEYS_VAULT_RECORD_SIZE),
+        .policy_id = PICOKEYS_VAULT_POLICY_ID,
+        .key_domain = 0,
+        .protection = PICOKEYS_VAULT_WRAP_PROTECTION,
+        .flags = PICOKEYS_VAULT_WRAP_FLAGS
+    };
+    return vault_update(&write, 1);
+}
+
+static int vault_migrate_legacy(void);
+
+int picokeys_vault_set_kvault(const uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], const uint8_t encryption_key[PICOKEYS_VAULT_KEY_SIZE], uint8_t app_id) {
+    if (!kvault || !encryption_key) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    uint8_t record[PICOKEYS_VAULT_RECORD_SIZE] = { 0 };
+    int ret = vault_wrap(encryption_key, kvault, record);
+    if (ret == PICOKEYS_OK) {
+        ret = vault_set_wrap_record(record, app_id);
+    }
+    mbedtls_platform_zeroize(record, sizeof(record));
     return ret;
+}
+
+int picokeys_vault_get_kvault(uint8_t app_id, const uint8_t encryption_key[PICOKEYS_VAULT_KEY_SIZE], uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE]) {
+    if (!encryption_key || !kvault) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    uint8_t record[PICOKEYS_VAULT_RECORD_SIZE] = { 0 };
+    int ret = vault_get_wrap_record(app_id, record);
+    if (ret == PICOKEYS_ERR_FILE_NOT_FOUND && app_id == 0 && vault_state.legacy_file) {
+        ret = vault_migrate_legacy();
+        if (ret == PICOKEYS_OK) {
+            ret = vault_get_wrap_record(0, record);
+        }
+    }
+    if (ret == PICOKEYS_OK) {
+        ret = vault_unwrap(encryption_key, record, kvault);
+    }
+    mbedtls_platform_zeroize(record, sizeof(record));
+    return ret;
+}
+
+int picokeys_vault_get_label(byte_buffer_t *label) {
+    if (!vault_state_valid() || !label || label->len > label->capacity || (!label->data && label->capacity > 0)) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    int ret = file_object_container_read(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, PICOKEYS_VAULT_OBJECT_LABEL, 0, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL, NULL, NULL, label);
+    return ret == PICOKEYS_ERR_FILE_NOT_FOUND ? PICOKEYS_OK : ret;
+}
+
+int picokeys_vault_set_label(const_byte_array_t label) {
+    if (label.len > PICOKEYS_VAULT_LABEL_MAX || (!label.data && label.len > 0)) {
+        return label.len > PICOKEYS_VAULT_LABEL_MAX ? PICOKEYS_WRONG_LENGTH : PICOKEYS_ERR_NULL_PARAM;
+    }
+    const file_object_container_write_t write = {
+        .object_type = PICOKEYS_VAULT_OBJECT_LABEL,
+        .object_tag = 0,
+        .data = label,
+        .policy_id = PICOKEYS_VAULT_POLICY_ID,
+        .key_domain = 0,
+        .protection = PICOKEYS_VAULT_LABEL_PROTECTION,
+        .flags = PICOKEYS_VAULT_LABEL_FLAGS
+    };
+    return vault_update(&write, 1);
+}
+
+static int vault_clear_file(file_t *file) {
+    if (!file) {
+        return PICOKEYS_OK;
+    }
+    meta_delete_no_commit(file->fid);
+    return flash_clear_file(file);
+}
+
+static int vault_migrate_legacy(void) {
+    if (!vault_state_valid() || !vault_state.legacy_file) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    uint8_t record[PICOKEYS_VAULT_RECORD_SIZE] = { 0 };
+    int ret = vault_get_wrap_record(0, record);
+    if (ret != PICOKEYS_ERR_FILE_NOT_FOUND) {
+        mbedtls_platform_zeroize(record, sizeof(record));
+        return ret;
+    }
+    const uint8_t *legacy_record = vault_legacy_record(vault_state.legacy_file);
+    if (!legacy_record) {
+        mbedtls_platform_zeroize(record, sizeof(record));
+        return PICOKEYS_ERR_FILE_NOT_FOUND;
+    }
+    memcpy(record, legacy_record, sizeof(record));
+
+    uint8_t label[PICOKEYS_VAULT_ENROLL_PLAIN_MAX] = { 0 };
+    size_t label_len = 0;
+    if (vault_state.legacy_label_file && file_has_data(vault_state.legacy_label_file)) {
+        label_len = file_get_size(vault_state.legacy_label_file);
+        if (label_len > PICOKEYS_VAULT_LABEL_MAX || label_len > sizeof(label)) {
+            mbedtls_platform_zeroize(label, sizeof(label));
+            mbedtls_platform_zeroize(record, sizeof(record));
+            return PICOKEYS_WRONG_LENGTH;
+        }
+        memcpy(label, file_get_data(vault_state.legacy_label_file), label_len);
+    }
+    const file_object_container_write_t writes[] = {
+        {
+            .object_type = PICOKEYS_VAULT_OBJECT_WRAP,
+            .object_tag = 0,
+            .data = CONST_BYTE_ARRAY(record, sizeof(record)),
+            .policy_id = PICOKEYS_VAULT_POLICY_ID,
+            .key_domain = 0,
+            .protection = PICOKEYS_VAULT_WRAP_PROTECTION,
+            .flags = PICOKEYS_VAULT_WRAP_FLAGS
+        },
+        {
+            .object_type = PICOKEYS_VAULT_OBJECT_LABEL,
+            .object_tag = 0,
+            .data = CONST_BYTE_ARRAY(label, label_len),
+            .policy_id = PICOKEYS_VAULT_POLICY_ID,
+            .key_domain = 0,
+            .protection = PICOKEYS_VAULT_LABEL_PROTECTION,
+            .flags = PICOKEYS_VAULT_LABEL_FLAGS
+        }
+    };
+    ret = vault_update(writes, sizeof(writes) / sizeof(writes[0]));
+    if (ret == PICOKEYS_OK && vault_state.legacy_label_file) {
+        ret = vault_clear_file(vault_state.legacy_label_file);
+        if (ret == PICOKEYS_OK && !flash_commit_sync(PICOKEYS_VAULT_COMMIT_TIMEOUT_MS)) {
+            ret = PICOKEYS_ERR_MEMORY_FATAL;
+        }
+    }
+    mbedtls_platform_zeroize(label, sizeof(label));
+    mbedtls_platform_zeroize(record, sizeof(record));
+    return ret;
+}
+
+int picokeys_vault_delete_kvault(uint8_t app_id) {
+    if (!vault_state_valid()) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    file_object_container_state_t state;
+    int ret = file_object_container_load(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL, &state);
+    if (ret == PICOKEYS_ERR_FILE_NOT_FOUND) {
+        if (app_id == 0 && vault_state.legacy_file && vault_legacy_record(vault_state.legacy_file)) {
+            ret = vault_clear_legacy_record(vault_state.legacy_file);
+        }
+        else {
+            ret = PICOKEYS_OK;
+        }
+        if (ret == PICOKEYS_OK && app_id == 0 && vault_state.legacy_label_file) {
+            ret = vault_clear_file(vault_state.legacy_label_file);
+            if (ret == PICOKEYS_OK && !flash_commit_sync(PICOKEYS_VAULT_COMMIT_TIMEOUT_MS)) {
+                ret = PICOKEYS_ERR_MEMORY_FATAL;
+            }
+        }
+        return ret;
+    }
+    if (ret != PICOKEYS_OK) {
+        return ret;
+    }
+    file_object_container_candidate_t *current = &state.candidates[state.current_slot];
+    ret = file_object_container_validate(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, current, state.crypto.protector);
+    if (ret != PICOKEYS_OK) {
+        file_object_container_candidate_t *previous = &state.candidates[current->slot ^ 1u];
+        if (!previous->valid || file_object_container_validate(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, previous, state.crypto.protector) != PICOKEYS_OK) {
+            return ret;
+        }
+        current = previous;
+    }
+    const file_object_descriptor_t *wrap = file_object_container_find(&current->manifest, PICOKEYS_VAULT_OBJECT_WRAP, app_id);
+    if (!wrap) {
+        return PICOKEYS_ERR_FILE_NOT_FOUND;
+    }
+    uint16_t wrap_count = 0;
+    for (uint16_t i = 0; i < current->manifest.object_count; i++) {
+        if (current->manifest.objects[i].object_type == PICOKEYS_VAULT_OBJECT_WRAP) {
+            wrap_count++;
+        }
+    }
+    if (wrap_count == 1) {
+        return file_object_container_delete(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL);
+    }
+    return file_object_container_remove(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, PICOKEYS_VAULT_OBJECT_WRAP, app_id, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL);
 }

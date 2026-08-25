@@ -175,7 +175,7 @@ int picokeys_vault_decrypt_layer(uint8_t algorithm, const uint8_t key[PICOKEYS_V
     return ret == 0 ? PICOKEYS_OK : PICOKEYS_VERIFICATION_FAILED;
 }
 
-int picokeys_vault_x448_generate(uint8_t private_key[PICOKEYS_VAULT_X448_BYTES], uint8_t public_key[PICOKEYS_VAULT_X448_BYTES]) {
+static int vault_x448_generate(uint8_t private_key[PICOKEYS_VAULT_X448_BYTES], uint8_t public_key[PICOKEYS_VAULT_X448_BYTES]) {
     if (!private_key || !public_key) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
@@ -198,7 +198,7 @@ int picokeys_vault_x448_generate(uint8_t private_key[PICOKEYS_VAULT_X448_BYTES],
     return private_len == PICOKEYS_VAULT_X448_BYTES && public_len == PICOKEYS_VAULT_X448_BYTES ? PICOKEYS_OK : PICOKEYS_WRONG_LENGTH;
 }
 
-int picokeys_vault_x448_shared(const uint8_t private_key[PICOKEYS_VAULT_X448_BYTES], const uint8_t peer_public[PICOKEYS_VAULT_X448_BYTES], uint8_t shared[PICOKEYS_VAULT_X448_BYTES]) {
+static int vault_x448_shared(const uint8_t private_key[PICOKEYS_VAULT_X448_BYTES], const uint8_t peer_public[PICOKEYS_VAULT_X448_BYTES], uint8_t shared[PICOKEYS_VAULT_X448_BYTES]) {
     if (!private_key || !peer_public || !shared) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
@@ -241,7 +241,7 @@ int picokeys_vault_x448_shared(const uint8_t private_key[PICOKEYS_VAULT_X448_BYT
     return shared_len == PICOKEYS_VAULT_X448_BYTES ? PICOKEYS_OK : PICOKEYS_WRONG_LENGTH;
 }
 
-bool picokeys_vault_enrollment_active(void) {
+static bool picokeys_vault_enrollment_active(void) {
     return vault_enroll_active;
 }
 
@@ -278,7 +278,7 @@ int picokeys_vault_enrollment_start(uint8_t public_key[PICOKEYS_VAULT_X448_BYTES
     }
 
     picokeys_vault_enrollment_clear();
-    int ret = picokeys_vault_x448_generate(vault_enroll_private, public_key);
+    int ret = vault_x448_generate(vault_enroll_private, public_key);
     if (ret == PICOKEYS_OK) {
         memcpy(vault_enroll_public, public_key, PICOKEYS_VAULT_X448_BYTES);
         random_fill_buffer(BYTE_ARRAY(vault_enroll_challenge, sizeof(vault_enroll_challenge)));
@@ -356,8 +356,8 @@ static int vault_enrollment_certificate_public(mbedtls_x509_crt *certificate, ui
     return ret == 0 && public_len == PICOKEYS_VAULT_X448_BYTES ? PICOKEYS_OK : PICOKEYS_WRONG_DATA;
 }
 
-int picokeys_vault_enrollment_finish(const uint8_t *packet, size_t packet_len, file_t *file, uint8_t app_id, const uint8_t wrapping_key[PICOKEYS_VAULT_KEY_SIZE], uint8_t *metadata, size_t metadata_capacity, size_t *metadata_len) {
-    if (!picokeys_vault_enrollment_active() || !packet || !file || !wrapping_key || !metadata_len || (metadata_capacity > 0 && !metadata) || packet_len < PICOKEYS_VAULT_ENROLL_MIN_PACKET_LEN) {
+int picokeys_vault_enrollment_decode(const uint8_t *packet, size_t packet_len, uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE], uint8_t *metadata, size_t metadata_capacity, size_t *metadata_len) {
+    if (!picokeys_vault_enrollment_active() || !packet || !kvault || !metadata_len || (metadata_capacity > 0 && !metadata) || packet_len < PICOKEYS_VAULT_ENROLL_MIN_PACKET_LEN) {
         picokeys_vault_enrollment_reset();
         return PICOKEYS_WRONG_LENGTH;
     }
@@ -406,12 +406,11 @@ int picokeys_vault_enrollment_finish(const uint8_t *packet, size_t packet_len, f
     memcpy(info + sizeof(vault_enroll_info) - 1 + PICOKEYS_VAULT_ENROLL_CHALLENGE_BYTES, certificate_public, PICOKEYS_VAULT_X448_BYTES);
     memcpy(info + sizeof(vault_enroll_info) - 1 + PICOKEYS_VAULT_ENROLL_CHALLENGE_BYTES + PICOKEYS_VAULT_X448_BYTES, vault_enroll_public, PICOKEYS_VAULT_X448_BYTES);
 
-    ret = picokeys_vault_x448_shared(vault_enroll_private, certificate_public, shared);
+    ret = vault_x448_shared(vault_enroll_private, certificate_public, shared);
     if (ret == PICOKEYS_OK) {
         ret = mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), NULL, 0, shared, sizeof(shared), info, sizeof(info), session_key, sizeof(session_key));
     }
 
-    uint8_t kvault[PICOKEYS_VAULT_KEY_SIZE] = { 0 };
     uint8_t enrollment_plain[PICOKEYS_VAULT_ENROLL_PLAIN_MAX] = { 0 };
     size_t plain_len = encrypted_len - 16u;
     if (ret == PICOKEYS_OK) {
@@ -443,12 +442,6 @@ int picokeys_vault_enrollment_finish(const uint8_t *packet, size_t packet_len, f
     }
 
     if (ret == PICOKEYS_OK) {
-        ret = picokeys_vault_store_kvault(file, app_id, wrapping_key, kvault);
-    }
-    if (ret == PICOKEYS_OK && !flash_commit_sync(5000)) {
-        ret = PICOKEYS_ERR_MEMORY_FATAL;
-    }
-    if (ret == PICOKEYS_OK) {
         *metadata_len = plain_metadata_len;
     }
 
@@ -456,28 +449,7 @@ int picokeys_vault_enrollment_finish(const uint8_t *packet, size_t packet_len, f
     mbedtls_platform_zeroize(session_key, sizeof(session_key));
     mbedtls_platform_zeroize(info, sizeof(info));
     mbedtls_platform_zeroize(certificate_public, sizeof(certificate_public));
-    mbedtls_platform_zeroize(kvault, sizeof(kvault));
     mbedtls_platform_zeroize(enrollment_plain, sizeof(enrollment_plain));
-    picokeys_vault_enrollment_reset();
-    return ret;
-}
-
-int picokeys_vault_clear_file(file_t *file) {
-    if (!file) {
-        return PICOKEYS_OK;
-    }
-    meta_delete_no_commit(file->fid);
-    return flash_clear_file(file);
-}
-
-int picokeys_vault_unenroll(file_t *file, file_t *label_file, uint8_t app_id) {
-    int ret = picokeys_vault_clear_wrapper(file, app_id);
-    if (ret == PICOKEYS_OK) {
-        ret = picokeys_vault_clear_file(label_file);
-    }
-    if (ret == PICOKEYS_OK && !flash_commit_sync(5000)) {
-        ret = PICOKEYS_ERR_MEMORY_FATAL;
-    }
     picokeys_vault_enrollment_reset();
     return ret;
 }
