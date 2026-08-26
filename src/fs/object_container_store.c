@@ -357,7 +357,7 @@ static void file_object_container_rollback(const uint16_t *record_fids, size_t r
     flash_commit();
 }
 
-int file_object_container_update(const file_object_container_layout_t *layout, uint32_t container_id, const file_object_container_write_t *writes, size_t write_count, const file_object_container_crypto_t *primary, const file_object_container_crypto_t *legacy) {
+static int file_object_container_update_internal(const file_object_container_layout_t *layout, uint32_t container_id, const file_object_container_write_t *writes, size_t write_count, const file_object_container_crypto_t *primary, const file_object_container_crypto_t *legacy, bool validate_records) {
     if (!file_object_container_layout_valid(layout) || !file_object_container_crypto_valid(primary) || !writes || write_count == 0 || write_count > FILE_OBJECT_MANIFEST_MAX_OBJECTS) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
@@ -372,7 +372,7 @@ int file_object_container_update(const file_object_container_layout_t *layout, u
         state.current_slot = FILE_OBJECT_CONTAINER_INVALID_SLOT;
         state.crypto = *primary;
     }
-    else {
+    else if (validate_records) {
         r = file_object_container_select_valid(layout, container_id, &state);
         if (r != PICOKEYS_OK) {
             return r;
@@ -486,6 +486,14 @@ int file_object_container_update(const file_object_container_layout_t *layout, u
         }
     }
     return PICOKEYS_OK;
+}
+
+int file_object_container_update(const file_object_container_layout_t *layout, uint32_t container_id, const file_object_container_write_t *writes, size_t write_count, const file_object_container_crypto_t *primary, const file_object_container_crypto_t *legacy) {
+    return file_object_container_update_internal(layout, container_id, writes, write_count, primary, legacy, true);
+}
+
+int file_object_container_update_without_record_validation(const file_object_container_layout_t *layout, uint32_t container_id, const file_object_container_write_t *writes, size_t write_count, const file_object_container_crypto_t *primary, const file_object_container_crypto_t *legacy) {
+    return file_object_container_update_internal(layout, container_id, writes, write_count, primary, legacy, false);
 }
 
 int file_object_container_remove(const file_object_container_layout_t *layout, uint32_t container_id, uint16_t object_type, uint16_t object_tag, const file_object_container_crypto_t *primary, const file_object_container_crypto_t *legacy) {

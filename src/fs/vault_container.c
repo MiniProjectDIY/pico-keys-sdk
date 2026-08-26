@@ -271,7 +271,7 @@ static int vault_update(const file_object_container_write_t *writes, size_t writ
     if (!vault_state_valid() || !writes || write_count == 0) {
         return PICOKEYS_ERR_NULL_PARAM;
     }
-    return file_object_container_update(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, writes, write_count, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL);
+    return file_object_container_update_without_record_validation(vault_state.layout, PICOKEYS_VAULT_CONTAINER_ID, writes, write_count, &vault_state.primary, vault_state.has_legacy ? &vault_state.legacy : NULL);
 }
 
 bool picokeys_vault_wrap_available(uint8_t app_id) {

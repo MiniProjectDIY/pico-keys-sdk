@@ -424,7 +424,7 @@ int picokeys_vault_enrollment_decode(const uint8_t *packet, size_t packet_len, u
         mbedtls_gcm_init(&gcm);
         ret = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, session_key, 256);
         if (ret == 0) {
-            ret = mbedtls_gcm_auth_decrypt(&gcm, plain_len, packet + encrypted_offset, 12u, info, sizeof(info), enrollment_tag, sizeof(enrollment_tag), enrollment_cipher, enrollment_plain);
+            ret = mbedtls_gcm_auth_decrypt(&gcm, plain_len, packet + encrypted_offset, 12u, info, sizeof(info), enrollment_tag, 16u, enrollment_cipher, enrollment_plain);
         }
         mbedtls_gcm_free(&gcm);
     }
